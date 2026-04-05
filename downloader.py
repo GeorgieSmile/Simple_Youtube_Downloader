@@ -132,6 +132,26 @@ def make_progress_hook(stats):
             stats["errors"] += 1
     return hook
 
+class YtdlpLogger:
+    """Forward yt-dlp log messages to our logger and count errors."""
+    def __init__(self, stats):
+        self.stats = stats
+
+    def debug(self, msg):
+        if msg.startswith("[debug]"):
+            return
+        log.debug(msg)
+
+    def info(self, msg):
+        log.info(msg)
+
+    def warning(self, msg):
+        log.warning(msg)
+
+    def error(self, msg):
+        self.stats["errors"] += 1
+        log.error(msg)
+
 def make_postprocessor_hook(pp_in_progress):
     """Track the file currently being post-processed so we can clean it up on interrupt."""
     def hook(d):
@@ -158,8 +178,7 @@ def make_ydl_opts(stats, pp_in_progress, since_days=None, browser=None):
         "match_filter": make_match_filter(),
         "ignoreerrors": True,
         "windowsfilenames": True,
-        "quiet": False,
-        "no_warnings": False,
+        "logger": YtdlpLogger(stats),
         "progress_hooks": [make_progress_hook(stats)],
         "postprocessor_hooks": [make_postprocessor_hook(pp_in_progress)],
     }
