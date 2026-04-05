@@ -1,0 +1,8 @@
+# Add one YouTube channel per line.
+# Supports @handles or full URLs.
+# Lines starting with # are ignored.
+#
+# Examples:
+# @LinusTechTips
+# https://www.youtube.com/@mkbhd
+
