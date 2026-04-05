@@ -143,7 +143,7 @@ def make_postprocessor_hook(pp_in_progress):
 
 # ── yt-dlp options ─────────────────────────────────────────────────────────────
 
-def make_ydl_opts(stats, pp_in_progress, since_days=None):
+def make_ydl_opts(stats, pp_in_progress, since_days=None, browser=None):
     opts = {
         "format": "bestaudio/best",
         "postprocessors": [
@@ -163,6 +163,9 @@ def make_ydl_opts(stats, pp_in_progress, since_days=None):
         "progress_hooks": [make_progress_hook(stats)],
         "postprocessor_hooks": [make_postprocessor_hook(pp_in_progress)],
     }
+    if browser is not None:
+        opts["cookiesfrombrowser"] = (browser,)
+        log.info(f"Using cookies from browser: {browser}")
     if since_days is not None:
         cutoff = (datetime.now() - timedelta(days=since_days)).strftime("%Y%m%d")
         opts["dateafter"] = cutoff
@@ -181,6 +184,13 @@ def parse_args():
         default=None,
         metavar="DAYS",
         help="Only download videos uploaded in the last N days (incremental mode).",
+    )
+    parser.add_argument(
+        "--browser",
+        type=str,
+        default=None,
+        metavar="BROWSER",
+        help="Pass cookies from a browser to bypass bot detection (e.g. --browser firefox).",
     )
     return parser.parse_args()
 
@@ -240,7 +250,7 @@ def main():
         # Per-channel state shared with progress/postprocessor hooks
         stats = {"downloaded": 0, "errors": 0}
         pp_in_progress = {"path": None}
-        ydl_opts = make_ydl_opts(stats, pp_in_progress, since_days=args.since)
+        ydl_opts = make_ydl_opts(stats, pp_in_progress, since_days=args.since, browser=args.browser)
 
         success = download_channel_with_retry(url, ydl_opts, pp_in_progress)
 
