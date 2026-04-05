@@ -73,7 +73,7 @@ All settings are constants at the top of `downloader.py`:
 | Constant | Default | Description |
 |---|---|---|
 | `SLEEP_MIN` / `SLEEP_MAX` | 3 / 10 s | Random delay between downloads |
-| `RATE_LIMIT` | `"2M"` | Bandwidth cap (2 MB/s) |
+| `RATE_LIMIT` | `2 * 1024 * 1024` | Bandwidth cap (2 MB/s) |
 | `MIN_DURATION` | 120 s | Skip videos shorter than 2 min (Shorts) |
 | `MAX_DURATION` | 5400 s | Skip videos longer than 90 min |
 | `MAX_RETRIES` | 3 | Retry attempts per channel on failure |
