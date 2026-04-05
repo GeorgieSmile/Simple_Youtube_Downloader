@@ -6,6 +6,7 @@ Downloads all videos from a list of YouTube channels and saves them as `.flac` a
 
 - Python 3.10+
 - [ffmpeg](https://ffmpeg.org/download.html) installed and on your PATH
+- [deno](https://deno.com) installed and on your PATH (used by yt-dlp to solve JS challenges)
 - [uv](https://github.com/astral-sh/uv) (or plain pip)
 
 ## Setup
