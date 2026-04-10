@@ -16,8 +16,9 @@ COMPLETED_FILE     = "completed_channels.txt"
 OUTPUT_DIR         = "downloads"
 ARCHIVE_FILE       = "archive.txt"
 LOG_FILE           = "downloader.log"
-SLEEP_MIN          = 3       # min seconds between video downloads
-SLEEP_MAX          = 10      # max seconds between video downloads
+SLEEP_MIN          = 5       # min seconds between video downloads
+SLEEP_MAX          = 15      # max seconds between video downloads
+SLEEP_REQUESTS     = 2       # seconds between HTTP requests within a single extraction
 RATE_LIMIT         = 2 * 1024 * 1024  # bandwidth cap in bytes/sec (2 MB/s)
 MAX_FILENAME_BYTES = 150     # max byte length for filenames
 MIN_DURATION       = 120     # seconds — skip videos shorter than 2 min (Shorts)
@@ -100,8 +101,16 @@ def truncate_title(info):
     if len(title_bytes) > max_title_bytes:
         info["title"] = title_bytes[:max_title_bytes].decode("utf-8", errors="ignore")
 
-def make_match_filter():
-    """Filter videos by duration and stop cleanly when stop_ref is set."""
+DATE_CUTOFF_STREAK = 5  # consecutive old-video rejections before treating channel as done
+
+def make_match_filter(since_days=None, date_done_ref=None):
+    """Filter videos by duration and date. Stops the channel early after DATE_CUTOFF_STREAK consecutive old videos."""
+    cutoff_date = None
+    if since_days is not None:
+        cutoff_date = (datetime.now() - timedelta(days=since_days)).strftime("%Y%m%d")
+
+    consecutive_old = [0]  # mutable counter for consecutive date-rejected videos
+
     def match_filter(info, *, incomplete):
         # Check stop before starting a new video download
         if stop_ref[0]:
@@ -118,6 +127,19 @@ def make_match_filter():
                     return f"Duration {duration:.0f}s is over {MAX_DURATION}s (too long)"
             except (TypeError, ValueError):
                 pass  # unknown duration — allow it
+        if cutoff_date is not None:
+            upload_date = info.get("upload_date")  # format: YYYYMMDD or None
+            if upload_date is not None and upload_date < cutoff_date:
+                consecutive_old[0] += 1
+                if consecutive_old[0] >= DATE_CUTOFF_STREAK:
+                    if date_done_ref is not None:
+                        date_done_ref[0] = True
+                    raise yt_dlp.utils.DownloadCancelled(
+                        f"Date cutoff reached ({DATE_CUTOFF_STREAK} consecutive old videos)"
+                    )
+                return f"Upload date {upload_date} is before cutoff {cutoff_date}"
+            elif upload_date is not None:
+                consecutive_old[0] = 0  # reset streak only on confirmed new videos
         return None
     return match_filter
 
@@ -163,7 +185,7 @@ def make_postprocessor_hook(pp_in_progress):
 
 # ── yt-dlp options ─────────────────────────────────────────────────────────────
 
-def make_ydl_opts(stats, pp_in_progress, since_days=None, browser=None):
+def make_ydl_opts(stats, pp_in_progress, since_days=None, browser=None, cookiefile=None, date_done_ref=None):
     opts = {
         "format": "bestaudio/best",
         "postprocessors": [
@@ -172,22 +194,26 @@ def make_ydl_opts(stats, pp_in_progress, since_days=None, browser=None):
         ],
         "outtmpl": os.path.join(OUTPUT_DIR, "%(uploader)s", "%(title)s [%(id)s].%(ext)s"),
         "download_archive": ARCHIVE_FILE,
+        "socket_timeout": 30,
         "sleep_interval": SLEEP_MIN,
         "max_sleep_interval": SLEEP_MAX,
+        "sleep_interval_requests": SLEEP_REQUESTS,
         "ratelimit": RATE_LIMIT,
-        "match_filter": make_match_filter(),
+        "match_filter": make_match_filter(since_days, date_done_ref),
         "ignoreerrors": True,
         "windowsfilenames": True,
         "logger": YtdlpLogger(stats),
         "progress_hooks": [make_progress_hook(stats)],
         "postprocessor_hooks": [make_postprocessor_hook(pp_in_progress)],
     }
+    if cookiefile is not None:
+        opts["cookiefile"] = cookiefile
+        log.info(f"Using cookies from file: {cookiefile}")
     if browser is not None:
         opts["cookiesfrombrowser"] = (browser,)
         log.info(f"Using cookies from browser: {browser}")
     if since_days is not None:
         cutoff = (datetime.now() - timedelta(days=since_days)).strftime("%Y%m%d")
-        opts["dateafter"] = cutoff
         log.info(f"Incremental mode: only videos uploaded on or after {cutoff}")
     return opts
 
@@ -211,9 +237,16 @@ def parse_args():
         metavar="BROWSER",
         help="Pass cookies from a browser to bypass bot detection (e.g. --browser firefox).",
     )
+    parser.add_argument(
+        "--cookies",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Path to a Netscape-format cookies.txt file (more stable than --browser).",
+    )
     return parser.parse_args()
 
-def download_channel_with_retry(url, ydl_opts, pp_in_progress):
+def download_channel_with_retry(url, ydl_opts, pp_in_progress, date_done_ref=None):
     """Try to download a channel up to MAX_RETRIES times. Returns True on success."""
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -221,11 +254,13 @@ def download_channel_with_retry(url, ydl_opts, pp_in_progress):
                 ydl.download([url])
             return True
         except yt_dlp.utils.DownloadCancelled:
-            # User pressed Ctrl+C — clean up any partial postprocessor output
+            # Clean up any partial postprocessor output
             path = pp_in_progress.get("path")
             if path and os.path.exists(path):
                 log.warning(f"  Removing incomplete file: {os.path.basename(path)}")
                 os.remove(path)
+            if date_done_ref is not None and date_done_ref[0]:
+                log.info(f"  Date cutoff reached — {DATE_CUTOFF_STREAK} consecutive old videos. Marking channel complete.")
             return True
         except Exception as e:
             if attempt < MAX_RETRIES:
@@ -269,9 +304,10 @@ def main():
         # Per-channel state shared with progress/postprocessor hooks
         stats = {"downloaded": 0, "errors": 0}
         pp_in_progress = {"path": None}
-        ydl_opts = make_ydl_opts(stats, pp_in_progress, since_days=args.since, browser=args.browser)
+        date_done_ref = [False]
+        ydl_opts = make_ydl_opts(stats, pp_in_progress, since_days=args.since, browser=args.browser, cookiefile=args.cookies, date_done_ref=date_done_ref)
 
-        success = download_channel_with_retry(url, ydl_opts, pp_in_progress)
+        success = download_channel_with_retry(url, ydl_opts, pp_in_progress, date_done_ref)
 
         total_downloaded += stats["downloaded"]
         total_errors += stats["errors"]
@@ -279,7 +315,7 @@ def main():
             f"  Channel summary — downloaded: {stats['downloaded']}, errors: {stats['errors']}"
         )
 
-        if success and not stop_ref[0]:
+        if success and (date_done_ref[0] or not stop_ref[0]):
             mark_channel_completed(channel)
             log.info(f"  Channel complete: {channel}")
 
