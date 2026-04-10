@@ -38,6 +38,10 @@ python downloader.py
 
 # Incremental — only videos from the last 30 days
 python downloader.py --since 30
+
+# Pass cookies to bypass bot detection (pick one)
+python downloader.py --browser firefox
+python downloader.py --cookies cookies.txt
 ```
 
 **3. Check the log** at any time:
@@ -73,7 +77,8 @@ All settings are constants at the top of `downloader.py`:
 
 | Constant | Default | Description |
 |---|---|---|
-| `SLEEP_MIN` / `SLEEP_MAX` | 3 / 10 s | Random delay between downloads |
+| `SLEEP_MIN` / `SLEEP_MAX` | 5 / 15 s | Random delay between downloads |
+| `SLEEP_REQUESTS` | 2 s | Delay between HTTP requests within a single extraction |
 | `RATE_LIMIT` | `2 * 1024 * 1024` | Bandwidth cap (2 MB/s) |
 | `MIN_DURATION` | 120 s | Skip videos shorter than 2 min (Shorts) |
 | `MAX_DURATION` | 5400 s | Skip videos longer than 90 min |
